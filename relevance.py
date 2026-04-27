@@ -15,6 +15,7 @@ STOP_TOKENS = frozenset(
 _SYN_REPL = (
     ("CNTRST", "CONTRAST"),
     (" WO W ", " WO WITH "),
+    ("CALC SCR", "CALCIUM SCORING"),
 )
 
 
@@ -170,10 +171,17 @@ def _anatomy_profile(blob: str) -> tuple[frozenset[str], frozenset[str]]:
     if (
         (" CORONARY " in s)
         or (" CARDIAC " in s)
-        or re.search(r"\bCAC\b|chest calcium|cor calcif", blob, re.I)
+        or re.search(r"\bCAC\b|chest calcium|cor calcif|coronary calcium|calcium score", blob, re.I)
         or re.search(r"angio.?coron|\bcoronary.?ang\b", blob, re.I)
     ):
         tags.add("cardiac_cor")
+
+    if re.search(
+        r"\b(ECHO|TTE|TEE|TRANSTHORAC|TRANSESOPH|STRESS\s*ECHO|2D\s*ECHO|STRESS\s*EKG)\b",
+        blob,
+        re.I,
+    ):
+        tags.add("echo_cardiac")
 
     # NM myocard perfusion vs CT coronary are often compared for same vascular question
     if re.search(r"(perfusion|spect|myocard|cardiolite|rubidium|thalli)", blob, re.I):
@@ -184,7 +192,7 @@ def _anatomy_profile(blob: str) -> tuple[frozenset[str], frozenset[str]]:
         tags.add("breast")
 
     if re.search(
-        r"\b(abd\b|abdomen|hepatic|hep\b|splen\b|bilary|bilir|kidney\b|renal|pelvic\b|GU\b|colon|append|pancreas|intestinal)",
+        r"\b(abd\b|abdomen|hepatic|hep\b|splen\b|bilary|bilir|kidney\b|renal|pelvic\b|GU\b|colon|append|pancreas|intestinal|ureter|nephro|urinary|stone\b)\b",
         blob,
         re.I,
     ):
@@ -195,6 +203,9 @@ def _anatomy_profile(blob: str) -> tuple[frozenset[str], frozenset[str]]:
 
     if re.search(r"\bneck\b\b", blob, re.I) and " SPINE " in s:
         spine_seg.add("C")
+
+    if re.search(r"\b(carotid|runoff|femoral|iliac|bypass graft|endovascular|arteri)\b", blob, re.I):
+        tags.add("vascular")
 
     return frozenset(tags), frozenset(spine_seg)
 
@@ -218,7 +229,8 @@ def _region_synergy(tags1: frozenset[str], tags2: frozenset[str]) -> float:
     uni = len(tags1.union(tags2))
     if uni == 0:
         return 0.0
-    return min(1.0, (2.5 * inter) / max(uni, inter + 2))
+    base = min(1.0, (2.5 * inter) / max(uni, inter + 2))
+    return base
 
 
 def is_prior_relevant(current_description: str, prior_description: str) -> bool:
@@ -241,6 +253,14 @@ def is_prior_relevant(current_description: str, prior_description: str) -> bool:
 
     synergy = _region_synergy(tags_c, tags_p)
 
+    # Softer boosts (avoid falsely inflating synergy on unrelated priors)
+    if ("echo_cardiac" in tags_c and ("cardiac_cor" in tags_p or "cardiac_perf_nm" in tags_p)) or (
+        "echo_cardiac" in tags_p and ("cardiac_cor" in tags_c or "cardiac_perf_nm" in tags_c)
+    ):
+        synergy = max(synergy, 0.175)
+    if "vascular" in tags_c and "vascular" in tags_p:
+        synergy = max(synergy, 0.12)
+
     score = (
         0.46 * seq
         + 0.42 * jac
@@ -255,14 +275,14 @@ def is_prior_relevant(current_description: str, prior_description: str) -> bool:
     same_bucket = fc is not None and fc == fp
     cross_mr_ct = (mc == "MRI" and mp == "CT") or (mc == "CT" and mp == "MRI")
 
-    # Same modality family (both MRI / both PET, etc.)
+    # Same modality — primary path
     if same_bucket:
         score += 0.12
         if synergy >= 0.12 or jac >= 0.18:
-            threshold = 0.38
-            return score >= threshold
-        threshold = 0.46
-        return score >= threshold
+            return score >= 0.378
+        if synergy < 0.07 and jac < 0.115 and seq < 0.41:
+            return score >= 0.478
+        return score >= 0.448
 
     # PET/NM overlapping anatomy
     if fc == "NM_PET" and fp == "NM_PET" and synergy >= 0.2:
