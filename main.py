@@ -129,6 +129,19 @@ def _build_predictions(body: PredictRequest) -> list[PredictionOut]:
     return out
 
 
+@app.get("/predict", include_in_schema=False)
+def predict_must_post() -> dict[str, str]:
+    """Explain why the score URL looks 'broken' when opened in a browser (GET vs POST)."""
+    return {
+        "message": (
+            "/predict expects HTTP POST with a JSON body (challenge request schema). "
+            "A normal browser tab uses GET—as in /docs—not POST."
+        ),
+        "docs": "/docs",
+        "hint": "New Lantern POSTs JSON to this URL; curl: curl -X POST $HOST/predict -H 'Content-Type: application/json' -d '{...}'.",
+    }
+
+
 @app.post("/predict", response_model=PredictResponse)
 async def predict(request: Request, body: PredictRequest) -> JSONResponse:
     t0 = time.perf_counter()
