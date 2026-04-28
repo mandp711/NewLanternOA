@@ -98,7 +98,7 @@ class PredictResponse(BaseModel):
 def root() -> dict[str, str | list[str]]:
     return {
         "service": "relevant-priors-v1",
-        "endpoints": ["POST /predict", "GET /health", "GET /docs"],
+        "endpoints": ["POST /predict", "GET /health", "GET /docs", "GET/POST /api/submissions"],
     }
 
 
@@ -110,6 +110,45 @@ def favicon() -> Response:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# --- Optional stubs (grading uses POST /predict on this host) ---
+# Dashboard "Cannot GET /api/submissions" is usually YOUR BROWSER hitting *New Lantern's origin*,
+# not Render. These routes help only if something probes YOUR deployment at /api/submissions.
+
+
+@app.get("/api/submissions", tags=["submission-probe"])
+def submissions_get_stub() -> dict[str, str | list[str]]:
+    return {
+        "status": "ok",
+        "message": (
+            "This service is graded via POST /predict. "
+            "Final submission (URL + zip + write-up) is done on New Lantern's site; "
+            "that site's /api/submissions belongs to them, not this app."
+        ),
+        "submission_body": {"endpoint": "/predict", "method": "POST"},
+    }
+
+
+@app.post("/api/submissions", tags=["submission-probe"])
+async def submissions_post_stub(request: Request) -> JSONResponse:
+    """No-op acknowledgment; graders send challenge JSON only to POST /predict."""
+    try:
+        payload = await request.json()
+        keys = list(payload.keys()) if isinstance(payload, dict) else None
+    except Exception:
+        keys = None
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "ok",
+            "note": (
+                "This path is unused by the relevance-priors challenge. "
+                "Send predictor requests to POST /predict with challenge JSON."
+            ),
+            "top_level_keys_seen": keys,
+        },
+    )
 
 
 def _build_predictions(body: PredictRequest) -> list[PredictionOut]:
