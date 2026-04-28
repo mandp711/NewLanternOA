@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -118,15 +119,16 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/submissions", tags=["submission-probe"])
-def submissions_get_stub() -> dict[str, str | list[str]]:
+def submissions_get_stub() -> dict[str, Any]:
+    """Probe endpoint; graders use POST /predict only."""
     return {
         "status": "ok",
         "message": (
             "This service is graded via POST /predict. "
-            "Final submission (URL + zip + write-up) is done on New Lantern's site; "
-            "that site's /api/submissions belongs to them, not this app."
+            "New Lantern website uploads use their own origin; probes to this URL are optional."
         ),
-        "submission_body": {"endpoint": "/predict", "method": "POST"},
+        "predict_method": "POST",
+        "predict_path": "/predict",
     }
 
 
